@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  image         String?
+  province      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  results       AcademicResult[]
+  savedItems    SavedItem[]
+  reviews       Review[]
+
+  @@index([email])
+}
+
+model AcademicResult {
+  id           String   @id @default(cuid())
+  userId       String
+  yearCompleted Int
+  province     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjects     SubjectGrade[]
+
+  @@index([userId])
+}
+
+model SubjectGrade {
+  id              String         @id @default(cuid())
+  academicResultId String
+  subjectName     String
+  level           Int
+  symbol          String?
+  percentage      Int?
+
+  academicResult  AcademicResult @relation(fields: [academicResultId], references: [id], onDelete: Cascade)
+
+  @@index([academicResultId])
+  @@index([subjectName])
+}
+
+model University {
+  id          String   @id @default(cuid())
+  name        String
+  shortName   String
+  slug        String   @unique
+  logo        String?
+  province    String
+  city        String
+  latitude    Float?
+  longitude   Float?
+  website     String?
+  description String?
+  ranking     Int?
+  type        String   @default("public")
+  founded     Int?
+  students    Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  courses           Course[]
+  accommodations    Accommodation[]
+  safetyData        SafetyData[]
+  reviews           Review[]
+
+  @@index([slug])
+  @@index([province])
+}
+
+model Course {
+  id              String   @id @default(cuid())
+  universityId    String
+  name            String
+  slug            String
+  code            String?
+  qualification   String
+  durationYears   Int
+  apsMin          Int?
+  description     String?
+  careerPaths     String?
+  annualCost      Int?
+  faculty         String?
+  mode            String   @default("full-time")
+  nqfLevel        Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  university      University   @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  requirements    CourseRequirement[]
+  careerCourses   CareerCourse[]
+  savedItems      SavedItem[]
+
+  @@unique([universityId, slug])
+  @@index([universityId])
+  @@index([name])
+}
+
+model CourseRequirement {
+  id         String  @id @default(cuid())
+  courseId    String
+  subject    String
+  minLevel   Int
+  isRequired Boolean @default(true)
+
+  course     Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+}
+
+model CareerPath {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  category      String?
+  avgSalaryMin  Int?
+  avgSalaryMax  Int?
+  demandLevel   String?
+  growthRate    String?
+  workLife      String?
+  keySkills     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  careerCourses CareerCourse[]
+  savedItems    SavedItem[]
+
+  @@index([slug])
+  @@index([category])
+}
+
+model CareerCourse {
+  id           String     @id @default(cuid())
+  careerPathId String
+  courseId      String
+
+  careerPath   CareerPath @relation(fields: [careerPathId], references: [id], onDelete: Cascade)
+  course       Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([careerPathId, courseId])
+  @@index([careerPathId])
+  @@index([courseId])
+}
+
+model Accommodation {
+  id            String   @id @default(cuid())
+  universityId  String
+  name          String
+  type          String
+  address       String?
+  latitude      Float?
+  longitude     Float?
+  priceMin      Int?
+  priceMax      Int?
+  amenities     String?
+  distanceKm    Float?
+  description   String?
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  university    University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  reviews       Review[]
+  savedItems    SavedItem[]
+
+  @@index([universityId])
+  @@index([priceMin])
+}
+
+model SafetyData {
+  id            String   @id @default(cuid())
+  universityId  String
+  areaName      String
+  safetyScore   Int
+  crimeRate     String?
+  wellLitStreets Boolean?
+  campusSecurity Boolean?
+  nearbyPolice   Boolean?
+  emergencyContacts String?
+  details       String?
+  updatedAt     DateTime @updatedAt
+
+  university    University @relation(fields: [universityId], references: [id], onDelete: Cascade)
+
+  @@unique([universityId, areaName])
+}
+
+model Review {
+  id            String   @id @default(cuid())
+  userId        String
+  universityId  String?
+  accommodationId String?
+  rating        Int
+  title         String?
+  content       String?
+  category      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  university    University?   @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  accommodation Accommodation? @relation(fields: [accommodationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([universityId])
+  @@index([accommodationId])
+}
+
+model SavedItem {
+  id            String     @id @default(cuid())
+  userId        String
+  courseId       String?
+  careerPathId  String?
+  accommodationId String?
+  createdAt     DateTime   @default(now())
+
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course        Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  careerPath    CareerPath? @relation(fields: [careerPathId], references: [id], onDelete: Cascade)
+  accommodation Accommodation? @relation(fields: [accommodationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId, careerPathId, accommodationId])
+  @@index([userId])
+}
