@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 
 interface CourseRec {
@@ -35,6 +36,8 @@ interface CourseRec {
   meetsSubjectReqs: boolean;
   matchedSubjects: string[];
   missingSubjects: string[];
+  why?: string;
+  dataSource?: string;
 }
 
 interface CareerRec {
@@ -227,6 +230,20 @@ export default function RecommendationsPage() {
                           </div>
                         )}
                       </div>
+
+                      {rec.why && (
+                        <div className="mt-3 rounded-xl bg-slate-50 border border-slate-100 p-3.5">
+                          <p className="text-sm font-semibold text-slate-700 mb-1">Why this course?</p>
+                          <p className="text-sm text-slate-600 leading-relaxed">{rec.why}</p>
+                        </div>
+                      )}
+
+                      {rec.dataSource === "live" && (
+                        <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-purple-600">
+                          <Sparkles className="h-2.5 w-2.5" />
+                          Live data from apply.org.za
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

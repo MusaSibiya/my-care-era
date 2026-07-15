@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { parseNsResultPdf, ParsedSubject, ParseProgress } from "@/lib/parse-ns-result";
-import { Upload, FileText, Loader2, AlertCircle, CheckCircle2, X, Scan, FileSearch } from "lucide-react";
+import { Upload, FileText, Loader2, AlertCircle, CheckCircle2, X, Scan, FileSearch, Sparkles } from "lucide-react";
+
+interface ParsedSubject {
+  name: string;
+  symbol?: string;
+  level?: number;
+  percentage?: number;
+}
 
 interface PdfUploadZoneProps {
   onParsed: (subjects: ParsedSubject[], year?: number, province?: string) => void;
@@ -11,14 +17,12 @@ interface PdfUploadZoneProps {
 export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
-  const [progress, setProgress] = useState<ParseProgress | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [warnings, setWarnings] = useState<string[]>([]);
   const [result, setResult] = useState<{
     count: number;
-    board: string;
-    usedOcr: boolean;
+    board?: string;
+    source: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -29,31 +33,47 @@ export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
         return;
       }
 
-      if (file.size > 20 * 1024 * 1024) {
-        setError("File too large. Maximum 20MB.");
+      if (file.size > 10 * 1024 * 1024) {
+        setError("File too large. Maximum 10MB.");
         return;
       }
 
       setError(null);
-      setWarnings([]);
       setFileName(file.name);
       setIsParsing(true);
       setResult(null);
 
       try {
-        const parsed = await parseNsResultPdf(file, (p) => setProgress(p));
+        const formData = new FormData();
+        formData.append("file", file);
 
-        if (parsed.warnings.length > 0) {
-          setWarnings(parsed.warnings);
+        const res = await fetch("/api/parse-pdf", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          setError(data.error || "Failed to parse PDF. Please try again or enter manually.");
+          setIsParsing(false);
+          return;
         }
 
-        if (parsed.subjects.length > 0) {
+        if (data.subjects && data.subjects.length > 0) {
+          const mapped = data.subjects.map((s: Record<string, unknown>) => ({
+            name: s.name as string,
+            symbol: s.symbol as string | undefined,
+            level: s.level as number | undefined,
+            percentage: s.percentage as number | undefined,
+          }));
+
           setResult({
-            count: parsed.subjects.length,
-            board: parsed.examBoard,
-            usedOcr: parsed.usedOcr,
+            count: data.count,
+            board: data.examBoard,
+            source: "Gemini AI",
           });
-          onParsed(parsed.subjects, parsed.year, parsed.province);
+          onParsed(mapped, data.yearCompleted);
         } else {
           setError("No subjects found. Please try a different file or enter manually.");
         }
@@ -63,7 +83,6 @@ export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
       }
 
       setIsParsing(false);
-      setProgress(null);
     },
     [onParsed]
   );
@@ -99,22 +118,8 @@ export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
   const clearFile = () => {
     setFileName(null);
     setError(null);
-    setWarnings([]);
     setResult(null);
-    setProgress(null);
     if (inputRef.current) inputRef.current.value = "";
-  };
-
-  const getProgressIcon = () => {
-    if (!progress) return <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />;
-    if (progress.stage === "ocr") return <Scan className="h-5 w-5 animate-pulse text-blue-600" />;
-    if (progress.stage === "reading") return <FileSearch className="h-5 w-5 animate-pulse text-emerald-600" />;
-    return <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />;
-  };
-
-  const getProgressColor = () => {
-    if (progress?.stage === "ocr") return "bg-blue-500";
-    return "bg-emerald-500";
   };
 
   return (
@@ -160,7 +165,7 @@ export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100">
               {isParsing ? (
-                getProgressIcon()
+                <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
               ) : result ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
               ) : error ? (
@@ -171,30 +176,21 @@ export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-slate-900">{fileName}</p>
-              {isParsing && progress && (
-                <div className="mt-1.5">
-                  <p className="text-xs text-slate-500">{progress.message}</p>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className={`h-full rounded-full transition-all duration-300 ${getProgressColor()}`}
-                      style={{ width: `${progress.percent}%` }}
-                    />
-                  </div>
-                </div>
+              {isParsing && (
+                <p className="mt-1 text-xs text-slate-500">Analyzing with Gemini AI...</p>
               )}
               {result && !isParsing && (
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <p className="text-xs font-medium text-emerald-600">
                     {result.count} subject{result.count !== 1 ? "s" : ""} detected
                   </p>
-                  {result.board !== "UNKNOWN" && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] font-bold text-purple-600">
+                    <Sparkles className="h-2.5 w-2.5" />
+                    {result.source}
+                  </span>
+                  {result.board && result.board !== "UNKNOWN" && (
                     <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
                       {result.board}
-                    </span>
-                  )}
-                  {result.usedOcr && (
-                    <span className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
-                      OCR SCANNED
                     </span>
                   )}
                 </div>
@@ -213,17 +209,6 @@ export default function PdfUploadZone({ onParsed }: PdfUploadZoneProps) {
               </button>
             )}
           </div>
-        </div>
-      )}
-
-      {warnings.length > 0 && !isParsing && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-700">
-          {warnings.map((w, i) => (
-            <p key={i} className="flex items-start gap-2">
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              {w}
-            </p>
-          ))}
         </div>
       )}
 

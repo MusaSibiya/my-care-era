@@ -28,6 +28,8 @@ export interface RecommendationResult {
   meetsSubjectReqs: boolean;
   matchedSubjects: string[];
   missingSubjects: string[];
+  why?: string;
+  dataSource?: "local" | "live";
 }
 
 export interface CareerRecommendation {

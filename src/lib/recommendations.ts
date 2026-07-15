@@ -1,6 +1,37 @@
 import { prisma } from "@/lib/db";
 import { calculateAPS, slugify } from "@/lib/utils";
+import { fetchQualifications, type UafmQualification } from "@/lib/uafm-api";
 import type { RecommendationResult, CareerRecommendation, SubjectInput } from "@/lib/types";
+
+function buildWhyExplanation(
+  meetsAps: boolean,
+  meetsSubjects: boolean,
+  studentAps: number,
+  apsMin: number | null,
+  matched: string[],
+  missing: string[],
+  courseName: string
+): string {
+  const parts: string[] = [];
+
+  if (meetsAps && meetsSubjects) {
+    parts.push(`You fully qualify for ${courseName}.`);
+    if (apsMin) parts.push(`Your APS of ${studentAps} meets the minimum of ${apsMin}.`);
+    if (matched.length) parts.push(`You have all required subjects: ${matched.join(", ")}.`);
+  } else if (!meetsAps && !meetsSubjects) {
+    parts.push(`You don't yet meet the requirements for ${courseName}.`);
+    if (apsMin) parts.push(`Your APS of ${studentAps} is below the minimum of ${apsMin} (need ${apsMin - studentAps} more points).`);
+    if (missing.length) parts.push(`Missing or below-level subjects: ${missing.join(", ")}.`);
+  } else if (!meetsAps) {
+    parts.push(`You meet the subject requirements but your APS needs work.`);
+    if (apsMin) parts.push(`Your APS of ${studentAps} is below the minimum of ${apsMin}. Consider improving marks in weaker subjects.`);
+  } else {
+    parts.push(`Your APS qualifies you but some subject requirements aren't met.`);
+    if (missing.length) parts.push(`Missing or below-level: ${missing.join(", ")}. You may need to take these as supplementary subjects.`);
+  }
+
+  return parts.join(" ");
+}
 
 export async function getCourseRecommendations(
   userId: string
@@ -18,6 +49,14 @@ export async function getCourseRecommendations(
     s.subjectName.toLowerCase()
   );
 
+  // Fetch live qualifications from apply.org.za if API key is set
+  let liveQualifications: UafmQualification[] = [];
+  try {
+    liveQualifications = await fetchQualifications();
+  } catch {
+    // API not available, fall back to local DB only
+  }
+
   const allCourses = await prisma.course.findMany({
     include: {
       university: { select: { id: true, name: true, slug: true, city: true, province: true } },
@@ -27,6 +66,7 @@ export async function getCourseRecommendations(
 
   const results: RecommendationResult[] = [];
 
+  // Score local DB courses
   for (const course of allCourses) {
     const meetsAps = !course.apsMin || studentAps >= course.apsMin;
 
@@ -56,6 +96,7 @@ export async function getCourseRecommendations(
     const matchScore = Math.round(subjectScore + apsScore + 10);
 
     if (matchScore > 30) {
+      const meetsSubjects = missing.length === 0;
       results.push({
         course: {
           id: course.id,
@@ -70,14 +111,78 @@ export async function getCourseRecommendations(
         },
         matchScore: Math.min(100, matchScore),
         meetsAps,
-        meetsSubjectReqs: missing.length === 0,
+        meetsSubjectReqs: meetsSubjects,
         matchedSubjects: matched,
         missingSubjects: missing,
+        why: buildWhyExplanation(meetsAps, meetsSubjects, studentAps, course.apsMin, matched, missing, course.name),
       });
     }
   }
 
-  return results.sort((a, b) => b.matchScore - a.matchScore).slice(0, 20);
+  // Also score live qualifications from apply.org.za
+  for (const qual of liveQualifications) {
+    const meetsAps = !qual.aps_minimum || studentAps >= qual.aps_minimum;
+    const qualReqs = qual.subject_requirements || {};
+    const matched: string[] = [];
+    const missing: string[] = [];
+
+    for (const [subject, minLevel] of Object.entries(qualReqs)) {
+      const studentSubject = latestResult.subjects.find(
+        (s) => s.subjectName.toLowerCase() === subject.toLowerCase()
+      );
+      if (studentSubject && studentSubject.level >= minLevel) {
+        matched.push(subject);
+      } else {
+        missing.push(subject);
+      }
+    }
+
+    const totalReqs = Object.keys(qualReqs).length || 1;
+    const subjectScore = (matched.length / totalReqs) * 60;
+    const apsScore = meetsAps ? 30 : (studentAps / (qual.aps_minimum || 28)) * 30;
+    const matchScore = Math.round(subjectScore + apsScore + 10);
+
+    if (matchScore > 30) {
+      const meetsSubjects = missing.length === 0;
+      results.push({
+        course: {
+          id: qual.id,
+          name: qual.name,
+          qualification: qual.duration,
+          durationYears: parseInt(qual.duration) || 3,
+          apsMin: qual.aps_minimum,
+          annualCost: null,
+          description: qual.description || "",
+          careerPaths: null,
+          university: {
+            id: qual.university_id,
+            name: qual.university_name,
+            slug: qual.university_id,
+            city: "",
+            province: "",
+          },
+        },
+        matchScore: Math.min(100, matchScore),
+        meetsAps,
+        meetsSubjectReqs: meetsSubjects,
+        matchedSubjects: matched,
+        missingSubjects: missing,
+        why: buildWhyExplanation(meetsAps, meetsSubjects, studentAps, qual.aps_minimum, matched, missing, qual.name),
+        dataSource: "live",
+      });
+    }
+  }
+
+  // Deduplicate by course name + university
+  const seen = new Set<string>();
+  const deduped = results.filter((r) => {
+    const key = `${r.course.name.toLowerCase()}-${r.course.university.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return deduped.sort((a, b) => b.matchScore - a.matchScore).slice(0, 30);
 }
 
 export async function getCareerRecommendations(

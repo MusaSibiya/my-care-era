@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import PdfUploadZone from "@/components/pdf-upload-zone";
-import { ParsedSubject } from "@/lib/parse-ns-result";
 import {
   Plus,
   Trash2,
@@ -85,10 +84,11 @@ export default function UploadResultsPage() {
   const [loading, setLoading] = useState(false);
   const [inputMode, setInputMode] = useState<"pdf" | "manual">("pdf");
 
-  if (status === "unauthenticated") {
-    router.push("/auth/signin");
-    return null;
-  }
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/auth/signin");
+    }
+  }, [status, router]);
 
   function addSubject() {
     setSubjects([...subjects, { subjectName: "", percentage: "" }]);
@@ -106,14 +106,13 @@ export default function UploadResultsPage() {
     setSubjects(updated);
   }
 
-  function handlePdfParsed(pdfSubjects: ParsedSubject[], pdfYear?: number, pdfProvince?: string) {
+  function handlePdfParsed(pdfSubjects: { name: string; percentage?: number }[], pdfYear?: number) {
     const mapped: SubjectEntry[] = pdfSubjects.map((s) => ({
-      subjectName: s.subjectName,
+      subjectName: s.name,
       percentage: typeof s.percentage === "number" ? s.percentage : "",
     }));
     setSubjects(mapped.length > 0 ? mapped : [{ subjectName: "", percentage: "" }]);
     if (pdfYear) setYear(pdfYear);
-    if (pdfProvince && provinces.includes(pdfProvince)) setProvince(pdfProvince);
     setInputMode("manual");
   }
 
